@@ -89,6 +89,10 @@ class CapacityProblem():
         self.con.CapLim = self.m.addConstr(self.var.CapNew <= self.D.CapLim, name='Capacitylimit')
         self.con.CapStorLim = self.m.addConstr(self.var.CapStor <= self.D.StorLim, name='Storage capacity limit')
 
+
+
+          # Production limited by sum of new capacity, existing capacity and phased out capacity times the production factor
+        
         # Generation for each hour is limited by capacity and production factors
         CapTotal = self.var.CapNew.reshape((G, 1, 1)) + self.D.CapExi.reshape((G, 1, 1)) + self.D.CapOut.reshape((G, 1, 1))
 
@@ -126,6 +130,13 @@ class CapacityProblem():
         Demand_scaled = self.D.Dem[:H, None]  # shape (H, 1), broadcast to (H, S)
 
         self.con.Balance = self.m.addConstr(EGen_sum + EDis_sum == Demand_scaled + EChar_sum, name='EnergyBalance')
+
+        
+        # for h in range(self.P.N_Hours):
+        #     for s in range(self.P.N_Scen):
+        #         self.con.Balance = self.m.addConstr(gp.quicksum(self.var.EGen[:, h, s]) 
+        #                                             #+ gp.quicksum(self.var.EDis[:, h, s]) - gp.quicksum(self.var.EChar[:, h, s])  
+        #                                             == self.D.Dem[h], name=f'EnergyBalance_{h}_{s}') 
 
 
         # Defining RES share as a percentage of total energy demand
@@ -168,6 +179,34 @@ class CapacityProblem():
             name='EDisLimit'
         )
 
+    # Indices of Lignite and Hard Coal
+        lignite_index = list(self.D.TechInfo['Technology']).index('Lignite')
+        hard_coal_index = list(self.D.TechInfo['Technology']).index('Hard Coal')
+
+        # Ramp rates for Hard Coal and Lignite
+        ramp_rates = {
+            lignite_index: 0.1,  # 7% of capacity
+            hard_coal_index: 0.1  # 8% of capacity
+        }
+
+        # Capacity including new investments, existing, and out capacity
+        #CapTotal = self.var.CapNew.reshape((G, 1, 1)) + self.D.CapExi.reshape((G, 1, 1)) + self.D.CapOut.reshape((G, 1, 1))
+
+        # --- Ramping Constraints ---
+        for g, ramp_rate in ramp_rates.items():
+            for s in range(S):
+                for t in range(1, H):  # Start from 1 to prevent indexing error
+                    # Up-ramping constraint
+                    self.m.addConstr(
+                        self.var.EGen[g, t, s] - self.var.EGen[g, t - 1, s] <= ramp_rate * CapTotal[g, 0, 0],
+                        name=f"Ramping_Up_{self.D.TechInfo['Technology'][g]}_S{s}_H{t}"
+                    )
+
+                    # Down-ramping constraint
+                    self.m.addConstr(
+                        self.var.EGen[g, t - 1, s] - self.var.EGen[g, t, s] <= ramp_rate * CapTotal[g, 0, 0],
+                        name=f"Ramping_Down_{self.D.TechInfo['Technology'][g]}_S{s}_H{t}"
+                    )
         
     
     def _build_objective(self):
@@ -181,7 +220,7 @@ class CapacityProblem():
         stor_cost = self.var.CapStor @ self.D.StorCost  
 
         # Set objective, minimizing total costs
-        self.m.setObjective(gen_capex_cost + op_cost + stor_cost, GRB.MINIMIZE)
+        self.m.setObjective(gen_capex_cost + op_cost/self.P.N_Scen + stor_cost, GRB.MINIMIZE)
 
 
     def _display_guropby_results(self):

@@ -6,17 +6,17 @@ from scipy.stats import norm
 
 
 # Load data from Excel files
-CapCost = pd.read_excel('Data/GovernmentTarget/CAPEX.xlsx')
-OpCost = pd.read_excel('Data/GovernmentTarget/OPEX.xlsx')
-TechInfo = pd.read_excel('Data/GovernmentTarget/TechInfo.xlsx')
-StorCost = pd.read_excel('Data/GovernmentTarget/StorageCapex.xlsx')
-CapLim = pd.read_excel('Data/GovernmentTarget/CapacityLimit.xlsx')
-CapExi = pd.read_excel('Data/GovernmentTarget/ExistingCapacity.xlsx')
-CapOut = pd.read_excel('Data/GovernmentTarget/CapacityOut.xlsx')
+CapCost = pd.read_excel('Data/ReferenceCase/CAPEX.xlsx')
+OpCost = pd.read_excel('Data/ReferenceCase/OPEX.xlsx')
+TechInfo = pd.read_excel('Data/ReferenceCase/TechInfo.xlsx')
+StorCost = pd.read_excel('Data/ReferenceCase/StorageCapex.xlsx')
+CapLim = pd.read_excel('Data/ReferenceCase/CapacityLimit.xlsx')
+CapExi = pd.read_excel('Data/ReferenceCase/ExistingCapacity.xlsx')
+CapOut = pd.read_excel('Data/ReferenceCase/CapacityOut.xlsx')
 Demand = pd.read_excel('Data/GovernmentTarget/Demand.xlsx')
-StorExi = pd.read_excel('Data/GovernmentTarget/ExistingStorage.xlsx')
-CapacityFactors= pd.read_excel('Data/GovernmentTarget/CapacityFactors.xlsx')
-StorLim = pd.read_excel('Data/GovernmentTarget/StorageLimit.xlsx')
+StorExi = pd.read_excel('Data/ReferenceCase/ExistingStorage.xlsx')
+CapacityFactors= pd.read_excel('Data/ReferenceCase/CapacityFactors.xlsx')
+StorLim = pd.read_excel('Data/ReferenceCase/StorageLimit.xlsx')
 
 # Create a dataframe for eta charge
 EtaCh = pd.DataFrame({
@@ -54,7 +54,7 @@ StorLim = np.array(StorLim['Maximum Capacity [GWh]'])
 import numpy as np
 
 # Constants
-years = [2021]
+years = [2021,2022,2023,2024]
 hours_per_year = len(Demand)
 scenarios_per_year = 1 # Change this to generate more per year
 num_years = len(years)
@@ -77,15 +77,15 @@ for i, year in enumerate(years):
         idx = start + hour
 
         OffWindMean = ProdFacOffWind[idx]
-        Offwind_std_dev = max(0.15 * OffWindMean, 0.05)
+        Offwind_std_dev = max(0 * OffWindMean, 0.0)
         OffWindDistributions[hour] = (OffWindMean, Offwind_std_dev)
 
         OnWindMean = ProdFacOnWind[idx]
-        Onwind_std_dev = max(0.15 * OnWindMean, 0.05)
+        Onwind_std_dev = max(0 * OnWindMean, 0.0)
         OnWindDistributions[hour] = (OnWindMean, Onwind_std_dev)
 
         solar_mean = ProdFacSolar[idx]
-        solar_std_dev = max(0.05 * solar_mean, 0.01)
+        solar_std_dev = max(0 * solar_mean, 0.0)
         solar_distributions[hour] = (solar_mean, solar_std_dev)
 
     # Step 2: Generate multiple scenarios from this year
