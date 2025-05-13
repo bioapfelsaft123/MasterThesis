@@ -5,19 +5,25 @@ import pandas as pd
 from scipy.stats import norm
 
 
-# Load data from Excel files
+#SetofScenarios = ['SituationToday', 'ReferenceCase', 'NetZero','HighFuel']
+
+RunScenario = 'SituationToday' # Change this to the scenario you want to run
+scenario_path = f'Data/{RunScenario}'
+# Load data from Excel files which is same for all scenarios
 CapCost = pd.read_excel('Data/ReferenceCase/CAPEX.xlsx')
-OpCost = pd.read_excel('Data/ReferenceCase/OPEX.xlsx')
 TechInfo = pd.read_excel('Data/ReferenceCase/TechInfo.xlsx')
 StorCost = pd.read_excel('Data/ReferenceCase/StorageCapex.xlsx')
 CapLim = pd.read_excel('Data/ReferenceCase/CapacityLimit.xlsx')
 CapExi = pd.read_excel('Data/ReferenceCase/ExistingCapacity.xlsx')
-CapOut = pd.read_excel('Data/ReferenceCase/CapacityOut.xlsx')
-Demand = pd.read_excel('Data/GovernmentTarget/Demand.xlsx')
 StorExi = pd.read_excel('Data/ReferenceCase/ExistingStorage.xlsx')
 CapacityFactors= pd.read_excel('Data/ReferenceCase/CapacityFactors.xlsx')
 StorLim = pd.read_excel('Data/ReferenceCase/StorageLimit.xlsx')
 
+
+# Load Scenario specific specific data
+OPEX = pd.read_excel(f'{scenario_path}/OPEX.xlsx')
+CapOut = pd.read_excel(f'{scenario_path}/CapacityOut.xlsx')
+Demand = pd.read_excel(f'{scenario_path}/Demand.xlsx')
 # Create a dataframe for eta charge
 EtaCh = pd.DataFrame({
     'Plant': ['Battery', 'Pumped Hydro'],
@@ -35,7 +41,7 @@ EtaDis = pd.DataFrame({
 # Convert data to numpy arrays
 
 CapCost = np.array(CapCost['Annualized Investment Cost [EUR/GW]'])
-OpCost = np.array(OpCost['Total OPEX [€/GWh]'])
+OpCost = np.array(OPEX['Total OPEX [€/GWh]'])
 #TechInfo = np.array(TechInfo['Type'])
 StorCost = np.array(StorCost['Annualized Investment Cost [EUR/GWh]'])
 CapLim = np.array(CapLim['Maximum Capacity [GW]'])
@@ -47,6 +53,7 @@ ProdFacOffWind = np.array(CapacityFactors['Offshore Capacity Factor'])
 ProdFacOnWind = np.array(CapacityFactors['Onshore Capacity Factor'])
 ProdFacSolar = np.array(CapacityFactors['Solar Capacity Factor'])
 StorLim = np.array(StorLim['Maximum Capacity [GWh]'])
+CO2Intensity = np.array(OPEX['CO2 emissions [t/MWh]'])
 
 
 
@@ -54,7 +61,7 @@ StorLim = np.array(StorLim['Maximum Capacity [GWh]'])
 import numpy as np
 
 # Constants
-years = [2021,2022,2023,2024]
+years = [2021]
 hours_per_year = len(Demand)
 scenarios_per_year = 1 # Change this to generate more per year
 num_years = len(years)
@@ -85,7 +92,7 @@ for i, year in enumerate(years):
         OnWindDistributions[hour] = (OnWindMean, Onwind_std_dev)
 
         solar_mean = ProdFacSolar[idx]
-        solar_std_dev = max(0 * solar_mean, 0.0)
+        solar_std_dev = max(0.0 * solar_mean, 0.0)
         solar_distributions[hour] = (solar_mean, solar_std_dev)
 
     # Step 2: Generate multiple scenarios from this year
