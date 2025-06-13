@@ -5,10 +5,11 @@ import pandas as pd
 from scipy.stats import norm
 from DataHandling import *
 import matplotlib.pyplot as plt
+from IDPredictor import *
 
 # Class for external input data
 class InputData():
-    def __init__(self, CapCost, OpCost, TechInfo, StorCost, CapLim,CapExi,CapOut,Dem,EtaCha,EtaDis,StorExi, Offwind_scenarios, Onwind_scenarios, Solar_scenarios, StorLim):
+    def __init__(self, CapCost, OpCost, TechInfo, StorCost, CapLim,CapExi,CapOut,Dem,EtaCha,EtaDis,StorExi, Offwind_scenarios, Onwind_scenarios, Solar_scenarios, StorLim,CO2Intensity):
         self.CapCost = CapCost
         self.OpCost = OpCost
         self.TechInfo = TechInfo
@@ -24,6 +25,7 @@ class InputData():
         self.Onwind_scenarios = Onwind_scenarios
         self.Solar_scenarios = Solar_scenarios
         self.StorLim = StorLim
+        self.CO2Intensity = CO2Intensity
         
 
 # Class for model parameters
@@ -388,7 +390,7 @@ class CapacityProblem():
 
         for s in range(self.P.N_Scen):
             # Calculate the total emissions for each technology and sum them up
-            emission_sum = np.sum(self.res.EGen[:, :, s] * CO2Intensity[:, None] * 1000, axis=1)  # tCO2
+            emission_sum = np.sum(self.res.EGen[:, :, s] * self.D.CO2Intensity[:, None] * 1000, axis=1)  # tCO2
 
             # Total energy generated in that scenario
             total_energy_generated = np.sum(self.res.EGen[:, :, s])
@@ -432,11 +434,12 @@ class CapacityProblem():
 # Defining the Day Ahead Problem class
 
 class DayAheadProblem():
-    def __init__(self, ParametersObj, DataObj, GenerationCapacity, StorageCapacity, Model_results = 1, Guroby_results = 1):
+    def __init__(self, ParametersObj, DataObj, GenerationCapacity, StorageCapacity,IDForecaster, Model_results = 1, Guroby_results = 1):
         self.P = ParametersObj # Parameters
         self.D = DataObj # Data
         self.Model_results = Model_results
         self.Guroby_results = Guroby_results
+        self.IDForecaster = IDForecaster
         self.GenCap = GenerationCapacity
         self.StorCap = StorageCapacity
         self.var = Expando()  # Variables
@@ -634,6 +637,42 @@ class DayAheadProblem():
         self.res.SOC = self.var.SOC.X
         self.res.EChar = self.var.EChar.X
         self.res.EDis = self.var.EDis.X
+
+
+        # Create DataFrame for each scenario
+        intra_day_arrays = []
+        for s in range(self.P.N_Scen):
+            print(f"Running Intraday Price Regression for Scenario {s}")
+            
+            # Fetch the features for the regression model
+            DA_prices = self.res.DA_Prices.iloc[:, s].values
+            Offshore_CF = self.D.Offwind_scenarios[:, s]
+            Onshore_CF = self.D.Onwind_scenarios[:, s]
+            Solar_CF = self.D.Solar_scenarios[:, s]
+            Demand = self.D.Dem
+
+            # Construct the DataFrame for the regression
+            features_df = pd.DataFrame({
+                'DA_price': DA_prices,
+                'Demand': Demand,
+                'Offshore_CF': Offshore_CF,
+                'Onshore_CF': Onshore_CF,
+                'PV_CF': Solar_CF
+            })
+
+            # Predict intraday prices using the pre-trained model
+            intraday_prices = self.IDForecaster.predict(features_df)
+
+            intra_day_arrays.append(intraday_prices)
+
+        # Convert to a NumPy array and store it
+        self.res.IntraDay_PricesArray = np.column_stack(intra_day_arrays)
+        print("Intraday prices stored successfully for all scenarios.")
+
+        # Save as CSV
+        np.savetxt(f'Intraday_Prices_All_Scenarios.csv', self.res.IntraDay_PricesArray, delimiter=',')
+        
+        print("Intraday Price Regression completed for all scenarios.")
 
 
 
@@ -1059,3 +1098,177 @@ class RelaxedCapacityProblem():
          # Print constraint info
         print(f"Total number of constraints: {self.res.TotalConstraints}")
         print(f"Number of active (binding) constraints: {self.res.ActiveConstraints}")
+
+
+# Defining the Day Ahead Problem class
+
+class BatteryOptimization():
+    def __init__(self, ParametersObj, DataObj, DayAheadPrices,IDPrices, Model_results = 1, Guroby_results = 1):
+        self.P = ParametersObj # Parameters
+        self.D = DataObj # Data
+        self.Model_results = int(np.array(Model_results).flatten()[0])
+        self.Guroby_results = Guroby_results
+        self.DAPrices = DayAheadPrices
+        self.IDPrices = IDPrices
+        self.var = Expando()  # Variables
+        self.con = Expando()  # Constraints
+        self.res = Expando()  # Results
+        self._build_model() 
+
+
+    def _build_variables(self):
+        # Create the variables
+        self.var.DADC = self.m.addMVar((self.P.N_Hours, self.P.N_Scen), lb=0)
+        self.var.DAC = self.m.addMVar((self.P.N_Hours, self.P.N_Scen), lb=0)
+        self.var.IDDC = self.m.addMVar((self.P.N_Hours, self.P.N_Scen), lb=0)
+        self.var.IDC = self.m.addMVar((self.P.N_Hours, self.P.N_Scen), lb=0)
+        self.var.SOC = self.m.addMVar((self.P.N_Hours, self.P.N_Scen), lb=0)
+
+    def _build_constraints(self):
+
+        # Define SOC
+
+        for h in range(self.P.N_Hours):
+            for s in range(self.P.N_Scen):
+                if h == 0:
+                    self.con.SOC = self.m.addConstr(self.var.SOC[h, s] == 0, name=f"Initial_SOC_{h}_{s}")
+                else:
+                    self.con.SOC = self.m.addConstr(self.var.SOC[h, s] == self.var.SOC[h-1, s] + (self.var.DAC[h-1, s] + self.var.IDC[h-1,s])*0.9 - self.var.DADC[h-1, s] - self.var.IDDC[h-1,s], name=f"SOC_{h}_{s}")
+
+        
+        for h in range(self.P.N_Hours):
+            for s in range(self.P.N_Scen):
+
+                # Limit SOC by capacity
+                self.con.SOC = self.m.addConstr(self.var.SOC[h, s] <= self.P.Capacity, name=f"SOCLimit_{h}_{s}")
+
+                # Limit charging and discharging by power
+                self.con.ChargePower = self.m.addConstr(self.var.DAC[h, s] + self.var.IDC[h, s] <= self.P.Power, name=f"PowerChargeLimite_{h}_{s}")
+                self.con.DischargePower = self.m.addConstr(self.var.DADC[h, s] + self.var.IDDC[h, s] <= self.P.Power, name=f"PowerDischargeLimit_{h}_{s}")
+
+                # Limit charging by available capacity
+                self.con.ChargeCapacity = self.m.addConstr(self.var.DAC[h, s]*0.9 + self.var.IDC[h,s]*0.9 <= self.P.Capacity - self.var.SOC[h, s], name=f"ChargeLimit_{h}_{s}")
+
+                #Limit discharging by SOC
+                self.con.DischargeSOC = self.m.addConstr(self.var.DADC[h, s] + self.var.DADC[h,s] <= self.var.SOC[h, s], name=f"DischargeLimit_{h}_{s}")
+
+
+
+        
+    
+    def _build_objective(self):
+
+        # Battery Revenue
+        DARevenue = gp.quicksum(self.var.DADC[h, s] * 0.9 * self.DAPrices[h, s] for h in range(self.P.N_Hours) for s in range(self.P.N_Scen))
+
+        IDRevenue = gp.quicksum(self.var.IDDC[h, s] * 0.9 * self.IDPrices[h, s] for h in range(self.P.N_Hours) for s in range(self.P.N_Scen))
+
+        Revenue = DARevenue + IDRevenue
+
+        # Battery Costs
+        Op_cost_DA = gp.quicksum(self.var.DAC[h, s] * self.DAPrices[h, s] for h in range(self.P.N_Hours) for s in range(self.P.N_Scen))
+        Op_cost_ID = gp.quicksum(self.var.IDC[h, s] * self.IDPrices[h, s] for h in range(self.P.N_Hours) for s in range(self.P.N_Scen))
+        Op_cost = Op_cost_DA + Op_cost_ID
+
+        # Set objective, minimizing total costs
+        self.m.setObjective((Revenue - Op_cost)/self.P.N_Scen, GRB.MAXIMIZE)
+
+
+    def _display_guropby_results(self):
+        self.m.setParam('OutputFlag', self.Guroby_results)
+
+    
+    def _build_model(self):
+        self.m = gp.Model('CapacityProblem')
+        self._build_variables()
+        self._build_constraints()
+        self._build_objective()
+        self._display_guropby_results()
+        self.m.write("CapacityProblem.lp")
+        self.m.optimize()
+        self._results()
+        if self.Model_results == 1:
+            self._extract_results()
+            
+   
+
+    
+    def _results(self):
+        self.res.obj = self.m.objVal
+        self.res.DADC = self.var.DADC.X
+        self.res.DAC = self.var.DAC.X
+        self.res.IDDC = self.var.IDDC.X
+        self.res.IDC = self.var.IDC.X
+
+        self.res.SOC = self.var.SOC.X
+
+        #Save results in a DataFrame
+        # Initialize a dictionary to store each scenario's DataFrame
+        self.res.OptimizationResults = {}
+
+        # Loop through each scenario and create a DataFrame
+        for s in range(self.P.N_Scen):
+            # Create DataFrames for discharge, charge, and SOC
+            df_discharge = pd.DataFrame(self.res.DADC[:, s], columns=['DADischarge'])
+            df_charge = pd.DataFrame(self.res.DAC[:, s], columns=['DACharge'])
+            df_IDdischarge = pd.DataFrame(self.res.IDDC[:, s], columns=['IDDischarge'])
+            df_IDcharge = pd.DataFrame(self.res.IDC[:, s], columns=['IDCharge'])
+            df_soc = pd.DataFrame(self.res.SOC[:, s], columns=['SOC'])
+            df_prices = pd.DataFrame(self.DAPrices[:, s], columns=['DA_Prices'])
+            df_IDPrices = pd.DataFrame(self.IDPrices[:, s], columns=['ID_Prices'])
+
+            # Merge them into one DataFrame for the scenario
+            df_scenario = pd.concat([df_discharge, df_charge, df_IDdischarge,df_IDcharge, df_soc, df_prices,df_IDPrices], axis=1)
+
+            # Store it in the dictionary with a descriptive name
+            self.res.OptimizationResults[f"Scenario_{s}"] = df_scenario
+        
+        # --- Calculation of Revenue, Cost, and Profit ---
+        DARevenue = (self.res.DADC * 0.9 * self.DAPrices).sum(axis=0)
+        IDRevenue = (self.res.IDDC * 0.9 * self.IDPrices).sum(axis=0)
+        DACost = (self.res.DAC * self.DAPrices).sum(axis=0)
+        IDCost = (self.res.IDC * self.IDPrices).sum(axis=0)
+        TotalProfit = (DARevenue + IDRevenue) - (DACost + IDCost)
+        RelativeProfit = TotalProfit / self.P.Power/1000
+
+        # Store in a DataFrame
+        self.res.FinancialSummary = pd.DataFrame({
+            'DA_Revenue': DARevenue,
+            'ID_Revenue': IDRevenue,
+            'DA_Cost': DACost,
+            'ID_Cost': IDCost,
+            'Total_Profit': TotalProfit,
+            'Profit [EUR/kW]': RelativeProfit
+        }, index=[f"Scenario_{s}" for s in range(self.P.N_Scen)])
+
+        # Save to CSV
+        self.res.FinancialSummary.to_csv('BatteryOptimization_FinancialSummary.csv')
+        print("Financial Summary saved successfully.")
+
+        
+        
+        
+
+        
+        
+    
+    
+        
+        
+
+        # # Extract results
+        # self.res.EGen = self.var.EGen.X
+        # self.res.SOC = self.var.SOC.X
+        # self.res.EChar = self.var.EChar.X
+        # self.res.EDis = self.var.EDis.X
+
+
+
+       
+
+    def _extract_results(self):
+        # Display the objective value
+        print('Objective value: ', self.m.objVal)
+        print('SOC', self.var.SOC.X)
+        
+       

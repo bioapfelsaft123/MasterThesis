@@ -1,0 +1,13 @@
+Plant,CapNew[GW],CapExi[GW],CapOut[GW]
+Offshore,10.756365556411133,8.456,0
+Onshore,31.119155756759415,59.841,0
+Biomass,0.0,8.577,0
+Lignite,0.0,18.363,-9
+Hard Coal,0.0,18.411,-10
+Gas,0.0,36.255,0
+Hydrogren,0.0,0.0,0
+Nuclear,0.0,0.0,0
+Solar PV,41.20317229276543,76.601,0
+Hydro,0.0,5.112,0
+Other RES,0.0,0.41,0
+Other Conventional,0.0,8.813,0
