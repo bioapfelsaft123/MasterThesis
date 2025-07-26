@@ -9,7 +9,7 @@ from IDPredictor import *
 
 # Class for external input data
 class InputData():
-    def __init__(self, CapCost, OpCost, TechInfo, StorCost, CapLim,CapExi,CapOut,Dem,EtaCha,EtaDis,StorExi, Offwind_scenarios, Onwind_scenarios, Solar_scenarios, StorLim,CO2Intensity):
+    def __init__(self, CapCost, OpCost, TechInfo, StorCost, CapLim,CapExi,CapOut,Dem,EtaCha,EtaDis,StorExi, Offwind_scenarios, Onwind_scenarios, Solar_scenarios, StorLim,CO2Intensity,StorCost_DF,FixedOpex,StorOpex,BatteryEfficiency):
         self.CapCost = CapCost
         self.OpCost = OpCost
         self.TechInfo = TechInfo
@@ -26,6 +26,10 @@ class InputData():
         self.Solar_scenarios = Solar_scenarios
         self.StorLim = StorLim
         self.CO2Intensity = CO2Intensity
+        self.StorCost_DF = StorCost_DF
+        self.FixedOpex = FixedOpex
+        self.StorOpex = StorOpex
+        self.BatteryEfficiency = BatteryEfficiency
         
 
 # Class for model parameters
@@ -189,8 +193,8 @@ class CapacityProblem():
 
         # Ramp rates for Hard Coal and Lignite
         ramp_rates = np.zeros(G)  # Initialize a vector of zeros
-        ramp_rates[lignite_index] = 0.1  # 10% ramp rate for Lignite
-        ramp_rates[hard_coal_index] = 0.1  # 10% ramp rate for Hard Coal
+        ramp_rates[lignite_index] = 0.5  # 10% ramp rate for Lignite
+        ramp_rates[hard_coal_index] = 0.5  # 10% ramp rate for Hard Coal
 
         # Capacity including new investments, existing, and out capacity
         CapTotal = self.var.CapNew + self.D.CapExi + self.D.CapOut  # Shape: (G,)
@@ -226,6 +230,10 @@ class CapacityProblem():
         # Vectorized investment cost for generators multiplied by new capacity
         gen_capex_cost = self.var.CapNew @ self.D.CapCost 
 
+        # Vectorized fixed opex
+        fixed_op_cost = ((self.var.CapNew + self.D.CapExi + self.D.CapOut)* self.D.FixedOpex).sum()
+        fixed_stor_op_cost = ((self.var.CapStor + self.D.StorExi)*self.D.StorOpex).sum()
+
         # Vectorized operational cost for generation multiplied by generation
         op_cost = (self.var.EGen * self.D.OpCost[:, None, None]).sum()
 
@@ -233,7 +241,7 @@ class CapacityProblem():
         stor_cost = self.var.CapStor @ self.D.StorCost  
 
         # Set objective, minimizing total costs
-        self.m.setObjective(gen_capex_cost + op_cost/self.P.N_Scen + stor_cost, GRB.MINIMIZE)
+        self.m.setObjective(gen_capex_cost + op_cost/self.P.N_Scen + stor_cost + fixed_op_cost+fixed_stor_op_cost, GRB.MINIMIZE)
 
 
     def _display_guropby_results(self):
@@ -1224,12 +1232,18 @@ class BatteryOptimization():
             self.res.OptimizationResults[f"Scenario_{s}"] = df_scenario
         
         # --- Calculation of Revenue, Cost, and Profit ---
-        DARevenue = (self.res.DADC * 0.9 * self.DAPrices).sum(axis=0)
-        IDRevenue = (self.res.IDDC * 0.9 * self.IDPrices).sum(axis=0)
+        DARevenue = (self.res.DADC * self.D.BatteryEfficiency * self.DAPrices).sum(axis=0)
+        IDRevenue = (self.res.IDDC * self.D.BatteryEfficiency * self.IDPrices).sum(axis=0)
         DACost = (self.res.DAC * self.DAPrices).sum(axis=0)
         IDCost = (self.res.IDC * self.IDPrices).sum(axis=0)
         TotalProfit = (DARevenue + IDRevenue) - (DACost + IDCost)
         RelativeProfit = TotalProfit / self.P.Power/1000
+
+
+        
+
+        # Calculate NPV for BESS
+        
 
         # Store in a DataFrame
         self.res.FinancialSummary = pd.DataFrame({
@@ -1245,7 +1259,25 @@ class BatteryOptimization():
         self.res.FinancialSummary.to_csv('BatteryOptimization_FinancialSummary.csv')
         print("Financial Summary saved successfully.")
 
-        
+        # Extract battery cost data from StorCost
+        battery_rows = self.D.StorCost_DF[self.D.StorCost_DF['Technology'] == 'BESS']
+        if battery_rows.empty:
+            raise ValueError("No entry for 'Battery' found in StorCost. Check the 'Technology' column.")
+        battery_row = battery_rows.iloc[0]
+        CAPEX = battery_row['CAPEX [EUR/kWh]']
+        OPEX = battery_row['OPEX [EUR/kWh]']
+        discount_rate = battery_row['Discount Rate']
+        lifetime = int(battery_row['Lifetime'])
+
+        # Calculate NPV for each scenario
+        NPVs = []
+        for profit in TotalProfit:
+            discounted_cash_flows = [(profit + (1-0.0155)**(t-1) - OPEX*self.P.Capacity*1000) / ((1 + discount_rate) ** t) for t in range(1, lifetime + 1)]
+            npv = -CAPEX*self.P.Capacity*1000 + sum(discounted_cash_flows)
+            NPVs.append(npv)
+
+        # Add to FinancialSummary
+        self.res.FinancialSummary['NPV [EUR/kW]'] = NPVs
         
         
 
