@@ -9,7 +9,7 @@ from IDPredictor import *
 
 # Class for external input data
 class InputData():
-    def __init__(self, CapCost, OpCost, TechInfo, StorCost, CapLim,CapExi,CapOut,Dem,EtaCha,EtaDis,StorExi, Offwind_scenarios, Onwind_scenarios, Solar_scenarios, StorLim,CO2Intensity,StorCost_DF,FixedOpex,StorOpex,BatteryEfficiency):
+    def __init__(self, CapCost, OpCost, TechInfo, StorCost, CapLim,CapExi,CapOut,Dem,EtaCha,EtaDis,StorExi, Offwind_scenarios, Onwind_scenarios, Solar_scenarios, StorLim,CO2Intensity,StorCost_DF,FixedOpex,StorOpex,BatteryEfficiency,MinLoad):
         self.CapCost = CapCost
         self.OpCost = OpCost
         self.TechInfo = TechInfo
@@ -30,6 +30,9 @@ class InputData():
         self.FixedOpex = FixedOpex
         self.StorOpex = StorOpex
         self.BatteryEfficiency = BatteryEfficiency
+        self.MinLoad = MinLoad
+
+
         
 
 # Class for model parameters
@@ -79,7 +82,7 @@ class CapacityProblem():
 
     def _build_variables(self):
         # Create the variables
-        self.var.CapNew = self.m.addMVar((self.P.N_Cap), lb=0)  # New Capacity for each type of generator technology
+        self.var.CapNew = self.m.addMVar((self.P.N_Cap))  # New Capacity for each type of generator technology
         self.var.EGen = self.m.addMVar((self.P.N_Cap, self.P.N_Hours, self.P.N_Scen), lb=0)  # Energy Production for each type of generator technology for each hour and scenario
         self.var.CapStor = self.m.addMVar((self.P.N_Stor), lb=0)  # New storage capacity for each type of storage technology
         self.var.SOC = self.m.addMVar((self.P.N_Stor, self.P.N_Hours,self.P.N_Scen), lb=0)  # State of charge for each type of storage technology for each hour and scenario  
@@ -96,6 +99,8 @@ class CapacityProblem():
         # Capacity is limited my maximum investable capacity for each technology
         self.con.CapLim = self.m.addConstr(self.var.CapNew <= self.D.CapLim, name='Capacitylimit')
         self.con.CapStorLim = self.m.addConstr(self.var.CapStor <= self.D.StorLim, name='Storage capacity limit')
+
+        
 
 
 
@@ -130,7 +135,13 @@ class CapacityProblem():
                 self.var.EGen[ConvMask, :, :] <= CapTotal[ConvMask, :, :],
                 name='ProdLimit_Conventional'
             )
-
+    #     # Enforce min load for conventional techn
+    #     MinLoad = self.D.MinLoad.reshape(G, 1, 1)          # (G,1,1)
+    #     self.con.MinLoad = self.m.addConstr(
+    #     self.var.EGen >= MinLoad * CapTotal,           # CapTotal is (G,1,1)
+    #     name='MinLoad'
+    #    )
+        
         # Demand and storage charge must be met for each hour and scenario by generation and storage discharge
         EGen_sum = self.var.EGen.sum(axis=0)    # shape (H, S)
         EDis_sum = self.var.EDis.sum(axis=0)    # shape (H, S)
@@ -538,6 +549,12 @@ class DayAheadProblem():
             EDis <= SOC,
             name='EDisLimit'
         )
+    #      # Enforce min load for conventional techn
+    #     MinLoad = self.D.MinLoad.reshape(G, 1, 1)          # (G,1,1)
+    #     self.con.MinLoad = self.m.addConstr(
+    #     self.var.EGen >= MinLoad * CapTotal,           # CapTotal is (G,1,1)
+    #     name='MinLoad'
+    #    )
 
             # Indices of Lignite and Hard Coal
         lignite_index = list(self.D.TechInfo['Technology']).index('Lignite')
@@ -545,8 +562,8 @@ class DayAheadProblem():
 
         # Ramp rates for Hard Coal and Lignite
         ramp_rates = np.zeros(G)  # Initialize a vector of zeros
-        ramp_rates[lignite_index] = 0.1  # 10% ramp rate for Lignite
-        ramp_rates[hard_coal_index] = 0.1  # 10% ramp rate for Hard Coal
+        ramp_rates[lignite_index] = 0.5  # 10% ramp rate for Lignite
+        ramp_rates[hard_coal_index] = 0.5  # 10% ramp rate for Hard Coal
 
         # Capacity including new investments, existing, and out capacity
         CapTotal = self.GenCap + self.D.CapExi + self.D.CapOut  # Shape: (G,)
@@ -732,6 +749,11 @@ class DayAheadProblem():
 
             # Store in dictionary
             self.res.DA_EGen_Scenarios[f"DA_Scenario_{s}"] = df_complete
+
+            # Export to Excel
+            output_filename = f"DA_EGen_Scenario_{s}.xlsx"
+            df_complete.to_excel(output_filename, index=False)
+            print(f"Exported {output_filename}")
         
         # Initialize the DataFrame to store results
         technology_names = self.D.TechInfo['Technology'].values

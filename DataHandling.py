@@ -8,8 +8,8 @@ CapCost = pd.read_excel('Data/ReferenceCase/CAPEX.xlsx')
 TechInfo = pd.read_excel('Data/ReferenceCase/TechInfo.xlsx')
 StorCost_DF = pd.read_excel('Data/ReferenceCase/StorageCapex.xlsx')
 CapLim = pd.read_excel('Data/ReferenceCase/CapacityLimit.xlsx')
-CapExidf = pd.read_excel('Data/ReferenceCase/ExistingCapacity.xlsx')
-StorExidf = pd.read_excel('Data/ReferenceCase/ExistingStorage.xlsx')
+
+
 CapacityFactors= pd.read_excel('Data/ReferenceCase/CapacityFactors.xlsx')
 StorLim = pd.read_excel('Data/ReferenceCase/StorageLimit.xlsx')
 Demand = pd.read_excel('Data/ReferenceCase/Demand.xlsx')
@@ -19,14 +19,15 @@ Demand = pd.read_excel('Data/ReferenceCase/Demand.xlsx')
 CapCost = np.array(CapCost['Annualized Investment Cost [EUR/GW]'])
 StorCost = np.array(StorCost_DF['Annualized Investment Cost [EUR/GWh]'])
 CapLim = np.array(CapLim['Maximum Capacity [GW]'])
-CapExi = np.array(CapExidf['Capacity [GW]'])
-StorExi = np.array(StorExidf['Capacity [GWh]'])
+
+
 ProdFacOffWind = np.array(CapacityFactors['Offshore Capacity Factor'])
 ProdFacOnWind = np.array(CapacityFactors['Onshore Capacity Factor'])
 ProdFacSolar = np.array(CapacityFactors['Solar Capacity Factor'])
 StorLim = np.array(StorLim['Maximum Capacity [GWh]'])
 StorOpex = np.array(StorCost_DF['OPEX [EUR/GWh]'])
 BatteryEfficiency = 0.93
+MinLoad = np.array(TechInfo['Minimum Load'])
 
 
 
@@ -34,7 +35,7 @@ BatteryEfficiency = 0.93
 
 
 # Constants
-years = [2021]  # List of years for which scenarios are generated
+years = [2021,2022,2023,2024]  # List of years for which scenarios are generated
 hours_per_year = len(Demand)
 scenarios_per_year = 1 # Change this to generate more per year
 num_years = len(years)
@@ -57,15 +58,15 @@ for i, year in enumerate(years):
         idx = start + hour
 
         OffWindMean = ProdFacOffWind[idx]
-        Offwind_std_dev = max(0.2 * OffWindMean, 0.0)
+        Offwind_std_dev = max(0.17 * OffWindMean, 0.0)
         OffWindDistributions[hour] = (OffWindMean, Offwind_std_dev)
 
         OnWindMean = ProdFacOnWind[idx]
-        Onwind_std_dev = max(0.2 * OnWindMean, 0.0)
+        Onwind_std_dev = max(0.17 * OnWindMean, 0.0)
         OnWindDistributions[hour] = (OnWindMean, Onwind_std_dev)
 
         solar_mean = ProdFacSolar[idx]
-        solar_std_dev = max(0.15 * solar_mean, 0.0)
+        solar_std_dev = max(0.1 * solar_mean, 0.0)
         solar_distributions[hour] = (solar_mean, solar_std_dev)
 
     # Step 2: Generate multiple scenarios from this year
@@ -112,6 +113,8 @@ def get_scenario_data(RunScenario):
     opex_df = pd.read_excel(f'{scenario_path}/OPEX.xlsx')
     capout_df = pd.read_excel(f'{scenario_path}/CapacityOut.xlsx')
     demand_df = pd.read_excel(f'{scenario_path}/Demand.xlsx')
+    StorExidf = pd.read_excel(f'{scenario_path}/ExistingStorage.xlsx')
+    CapExidf = pd.read_excel(f'{scenario_path}/ExistingCapacity.xlsx')
 
     # Convert data to numpy arrays
     OpCost = np.array(opex_df['Total OPEX [€/GWh]'])
@@ -119,5 +122,7 @@ def get_scenario_data(RunScenario):
     Demand = np.array(demand_df['Demand [GWh]'])
     CO2Intensity = np.array(opex_df['CO2 emissions [t/MWh]'])
     FixedOpex = np.array(opex_df['Fixed OPEX [EUR/GW]'])
+    StorExi = np.array(StorExidf['Capacity [GWh]'])
+    CapExi = np.array(CapExidf['Capacity [GW]'])
 
-    return Demand, OpCost, CapOut, CO2Intensity, FixedOpex
+    return Demand, OpCost, CapOut, CO2Intensity, FixedOpex, StorExi, CapExi
