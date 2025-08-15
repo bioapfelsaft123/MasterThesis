@@ -7,10 +7,11 @@ from scipy.stats import norm
 CapCost = pd.read_excel('Data/ReferenceCase/CAPEX.xlsx')
 TechInfo = pd.read_excel('Data/ReferenceCase/TechInfo.xlsx')
 StorCost_DF = pd.read_excel('Data/ReferenceCase/StorageCapex.xlsx')
-CapLim = pd.read_excel('Data/ReferenceCase/CapacityLimit.xlsx')
+
 
 
 CapacityFactors= pd.read_excel('Data/ReferenceCase/CapacityFactors.xlsx')
+CapacityFactorsUnseen = pd.read_excel('Data/UnseenScenarios/CapacityFactors_2017_2020.xlsx')
 StorLim = pd.read_excel('Data/ReferenceCase/StorageLimit.xlsx')
 Demand = pd.read_excel('Data/ReferenceCase/Demand.xlsx')
 
@@ -18,12 +19,15 @@ Demand = pd.read_excel('Data/ReferenceCase/Demand.xlsx')
  # Convert data to numpy arrays
 CapCost = np.array(CapCost['Annualized Investment Cost [EUR/GW]'])
 StorCost = np.array(StorCost_DF['Annualized Investment Cost [EUR/GWh]'])
-CapLim = np.array(CapLim['Maximum Capacity [GW]'])
+
 
 
 ProdFacOffWind = np.array(CapacityFactors['Offshore Capacity Factor'])
 ProdFacOnWind = np.array(CapacityFactors['Onshore Capacity Factor'])
 ProdFacSolar = np.array(CapacityFactors['Solar Capacity Factor'])
+ProdFacOffWindUnseen = np.array(CapacityFactorsUnseen['Offshore Capacity Factor'])
+ProdFacOnWindUnseen = np.array(CapacityFactorsUnseen['Onshore Capacity Factor'])
+ProdFacSolarUnseen = np.array(CapacityFactorsUnseen['Solar Capacity Factor'])
 StorLim = np.array(StorLim['Maximum Capacity [GWh]'])
 StorOpex = np.array(StorCost_DF['OPEX [EUR/GWh]'])
 BatteryEfficiency = 0.93
@@ -89,6 +93,68 @@ for i, year in enumerate(years):
             sample = np.random.normal(mean, std)
             Solar_scenarios[hour, col_index] = np.clip(sample, 0, 1)
 
+
+
+
+#Sampling Scenarios for unseen data
+
+
+# Constants
+years = [2017]  # List of years for which scenarios are generated
+hours_per_year = len(Demand)
+scenarios_per_year = 1 # Change this to generate more per year
+num_years = len(years)
+total_scenarios = num_years * scenarios_per_year
+
+# Initialize final scenario arrays
+Offwind_scenarios_Unseen = np.zeros((hours_per_year, total_scenarios))
+Onwind_scenarios_Unseen = np.zeros((hours_per_year, total_scenarios))
+Solar_scenarios_Unseen = np.zeros((hours_per_year, total_scenarios))
+
+for i, year in enumerate(years):
+    start = i * hours_per_year
+
+    # Step 1: Build distribution dictionary from that year's data
+    OffWindDistributionsUnseen = {}
+    OnWindDistributionsUnseen = {}
+    solar_distributionsUnseen = {}
+
+    for hour in range(hours_per_year):
+        idx = start + hour
+
+        OffWindMeanUnseen = ProdFacOffWindUnseen[idx]
+        Offwind_std_dev_Unseen = max(0.17 * OffWindMeanUnseen, 0.0)
+        OffWindDistributionsUnseen[hour] = (OffWindMeanUnseen, Offwind_std_dev_Unseen)
+
+        OnWindMeanUnseen = ProdFacOnWindUnseen[idx]
+        Onwind_std_dev_Unseen = max(0.17 * OnWindMeanUnseen, 0.0)
+        OnWindDistributionsUnseen[hour] = (OnWindMeanUnseen, Onwind_std_dev_Unseen)
+
+        solar_mean_Unseen = ProdFacSolarUnseen[idx]
+        solar_std_dev_Unseen = max(0.1 * solar_mean_Unseen, 0.0)
+        solar_distributionsUnseen[hour] = (solar_mean_Unseen, solar_std_dev_Unseen)
+
+    # Step 2: Generate multiple scenarios from this year
+    for s in range(scenarios_per_year):
+        col_index = i * scenarios_per_year + s
+
+        for hour in range(hours_per_year):
+            # Offshore
+            mean, std = OffWindDistributionsUnseen[hour]
+            sample = np.random.normal(mean, std)
+            Offwind_scenarios_Unseen[hour, col_index] = np.clip(sample, 0, 1)
+
+            # Onshore
+            mean, std = OnWindDistributionsUnseen[hour]
+            sample = np.random.normal(mean, std)
+            Onwind_scenarios_Unseen[hour, col_index] = np.clip(sample, 0, 1)
+
+            # Solar
+            mean, std = solar_distributionsUnseen[hour]
+            sample = np.random.normal(mean, std)
+            Solar_scenarios_Unseen[hour, col_index] = np.clip(sample, 0, 1)
+
+
 # Create a dataframe for eta charge
 EtaCh = pd.DataFrame({
     'Plant': ['Battery', 'Pumped Hydro'],
@@ -115,6 +181,7 @@ def get_scenario_data(RunScenario):
     demand_df = pd.read_excel(f'{scenario_path}/Demand.xlsx')
     StorExidf = pd.read_excel(f'{scenario_path}/ExistingStorage.xlsx')
     CapExidf = pd.read_excel(f'{scenario_path}/ExistingCapacity.xlsx')
+    CapLim = pd.read_excel(f'{scenario_path}/CapacityLimit.xlsx')
 
     # Convert data to numpy arrays
     OpCost = np.array(opex_df['Total OPEX [€/GWh]'])
@@ -124,5 +191,6 @@ def get_scenario_data(RunScenario):
     FixedOpex = np.array(opex_df['Fixed OPEX [EUR/GW]'])
     StorExi = np.array(StorExidf['Capacity [GWh]'])
     CapExi = np.array(CapExidf['Capacity [GW]'])
+    CapLim = np.array(CapLim['Maximum Capacity [GW]'])
 
-    return Demand, OpCost, CapOut, CO2Intensity, FixedOpex, StorExi, CapExi
+    return Demand, OpCost, CapOut, CO2Intensity, FixedOpex, StorExi, CapExi,CapLim
